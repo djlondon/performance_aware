@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 // Read file
 
@@ -13,23 +14,64 @@ const int MAX_BYTES = 512;
 
 int read_file(const char *fname);
 
-void parse_byte1(uint8_t byte)
+void parse_byte1(uint8_t byte, uint8_t *W, uint8_t *D)
 {
     // first 6 bytes determine operand
     uint8_t opcode = byte >> 2;
     // 2nd last byte
-    uint8_t D = (byte & 0x02) >> 1;
+    *D = (byte & 0x02) >> 1;
     // last byte
-    uint8_t W = (byte & 0x01);
+    *W = (byte & 0x01);
     char *op = "";
     if (opcode == 0b100010)
     {
         op = "mov";
     }
-    printf("%x: %s %d %d\n", byte, op, D, W);
+    printf("%x: %s %d %d\n", byte, op, *D, *W);
 }
 
-void parse_byte2(u_int8_t byte, uint8_t D, uint8_t W)
+void parse_reg(uint8_t byte, uint8_t W, char out[3])
+{
+    if (byte == 0 || (byte == 4 && W == 0))
+        out[0] = 'A';
+    else if (byte == 1 || (byte == 5 && W == 0))
+        out[0] = 'C';
+    else if (byte == 2 || (byte == 6 && W == 0))
+        out[0] = 'D';
+    else if (byte == 3 || (byte == 7 && W == 0))
+        out[0] = 'B';
+    else if (W == 1)
+    {
+        if (byte == 4)
+            out[0] = 'S';
+        if (byte == 4)
+            out[0] = 'B';
+        if (byte == 4)
+            out[0] = 'S';
+        if (byte == 4)
+            out[0] = 'D';
+    }
+    /* out[1]*/
+    if (W == 0)
+    {
+        if (byte < 4)
+            out[1] = 'L';
+        else
+            out[1] = 'H';
+    }
+    if (W == 1)
+    {
+        if (byte < 4)
+            out[1] = 'X';
+        else if (byte < 6)
+            out[1] = 'P';
+        else
+            out[1] = 'I';
+    }
+    out[2] = '\0';
+}
+
+void parse_byte2(u_int8_t byte, uint8_t W, uint8_t D)
 {
     // ABXXXXXX: first 2 bytes
     uint8_t MOD = byte >> 6;
@@ -37,46 +79,23 @@ void parse_byte2(u_int8_t byte, uint8_t D, uint8_t W)
     uint8_t REG = (byte >> 3) & 0x07;
     // XXXXXABC: last 3 bytes
     uint8_t RM = byte & 0x07;
-    char regout[2];
-    /* regout[0] */
-    if (REG == 0 || (REG == 4 && W == 0))
-        regout[0] = 'A';
-    else if (REG == 1 || (REG == 5 && W == 0))
-        regout[0] = 'C';
-    else if (REG == 2 || (REG == 6 && W == 0))
-        regout[0] = 'D';
-    else if (REG == 3 || (REG == 7 && W == 0))
-        regout[0] = 'B';
-    else if (W == 1)
+    char regout[3];
+    char rmout[3];
+    /* regout */
+    parse_reg(REG, W, regout);
+    // TODO consider MOD
+    // rmout
+    if (MOD == 3)
     {
-        if (REG == 4)
-            regout[0] = 'S';
-        if (REG == 4)
-            regout[0] = 'B';
-        if (REG == 4)
-            regout[0] = 'S';
-        if (REG == 4)
-            regout[0] = 'D';
+        // same logic as reg
+        parse_reg(RM, W, rmout);
     }
-    /* regout[1]*/
-    if (W == 0)
-    {
-        if (REG < 4)
-            regout[1] = 'L';
-        else
-            regout[1] = 'H';
-    }
-    if (W == 1)
-    {
-        if (REG < 4)
-            regout[1] = 'X';
-        else if (REG < 6)
-            regout[1] = 'P';
-        else
-            regout[1] = 'I';
-    }
-
-    printf("%d: %d %d %s %d\n", byte, MOD, REG, regout, RM);
+    // if D regout, rmout else rmout, regout
+    if (D)
+        printf("%s, %s\n", regout, rmout);
+    else
+        printf("%s, %s\n", rmout, regout);
+    printf("%d: %d %d %s %d %s\n", byte, MOD, REG, regout, RM, rmout);
 }
 
 int main(int argc, char *argv[])
@@ -105,6 +124,7 @@ int read_file(const char *fname)
     }
 
     int c, i = 0; // note: int, not char, required to handle EOF
+    uint8_t W, D = 0;
     while ((c = fgetc(fp)) != EOF)
     {
         if (c == '\n')
@@ -115,10 +135,10 @@ int read_file(const char *fname)
         switch (i)
         {
         case 0:
-            parse_byte1(c);
+            parse_byte1(c, &W, &D);
             break;
         case 1:
-            parse_byte2(c, 0, 0);
+            parse_byte2(c, W, D);
             break;
         }
         i++;
