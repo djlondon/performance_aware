@@ -44,11 +44,11 @@ void parse_reg(uint8_t byte, uint8_t W, char out[3])
     {
         if (byte == 4)
             out[0] = 'S';
-        if (byte == 4)
+        if (byte == 5)
             out[0] = 'B';
-        if (byte == 4)
+        if (byte == 6)
             out[0] = 'S';
-        if (byte == 4)
+        if (byte == 7)
             out[0] = 'D';
     }
     /* out[1]*/
