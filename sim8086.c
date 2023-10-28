@@ -127,6 +127,7 @@ int read_file(const char *fname)
     char opout[4];
     char rout[8];
     char lineout[14];
+    puts("bits 16\n");
     while ((c = fgetc(fp)) != EOF)
     {
         if (c == '\n')
@@ -141,7 +142,7 @@ int read_file(const char *fname)
             break;
         case 1:
             parse_byte2(c, W, D, rout);
-            sprintf(lineout, "%s %s\n", opout, rout);
+            sprintf(lineout, "%s %s", opout, rout);
             puts(lineout);
             break;
         }
