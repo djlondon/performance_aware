@@ -91,9 +91,9 @@ void parse_byte2(u_int8_t byte, uint8_t W, uint8_t D, char out[])
     }
     // if D regout, rmout else rmout, regout
     if (D)
-        sprintf(out, "%s, %s\n", regout, rmout);
+        sprintf(out, "%s, %s", regout, rmout);
     else
-        sprintf(out, "%s, %s\n", rmout, regout);
+        sprintf(out, "%s, %s", rmout, regout);
     // printf("%d: %d %d %s %d %s\n", byte, MOD, REG, regout, RM, rmout);
 }
 
@@ -129,13 +129,8 @@ int read_file(const char *fname)
     char lineout[14];
     puts("bits 16\n");
     while ((c = fgetc(fp)) != EOF)
-    {
-        if (c == '\n')
-        {
-            i = 0;
-            continue;
-        }
-        switch (i)
+    {        
+        switch (i % 2)
         {
         case 0:
             parse_byte1(c, &W, &D, opout);
@@ -148,6 +143,7 @@ int read_file(const char *fname)
         }
         i++;
     }
+    puts("");
     if (ferror(fp))
         puts("I/O error when reading");
     else if (feof(fp))
