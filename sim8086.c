@@ -15,17 +15,19 @@ XXXXXXXX | XX  XXX XXX
 
 int read_file(const char *fname);
 
-void parse_byte1(uint8_t byte, uint8_t *W, uint8_t *D, u_int8_t *REG, char *out);
+int parse_byte1(uint8_t byte, uint8_t *W, uint8_t *D, u_int8_t *REG, char *out);
 
 void parse_byte2(u_int8_t byte, uint8_t W, uint8_t D, char out[]);
 
-void parse_byte1(uint8_t byte, uint8_t *W, uint8_t *D, uint8_t *REG, char *out)
-{   
+int parse_byte1(uint8_t byte, uint8_t *W, uint8_t *D, uint8_t *REG, char *out)
+{
     /* 1011WREG */
+    int success = 0;
     if (byte >> 4 == 0b1011) {
-        sprintf(out, "mov");        
-        *W = (byte >> 3) & 0x01;    
+        sprintf(out, "mov");
+        *W = (byte >> 3) & 0x01;
         *REG = byte & 0x07;
+        success = 1;
     }
     /* 100010DW */
     else if (byte >> 2 == 0b100010)
@@ -35,8 +37,10 @@ void parse_byte1(uint8_t byte, uint8_t *W, uint8_t *D, uint8_t *REG, char *out)
         *D = (byte & 0x02) >> 1;
         // last byte
         *W = (byte & 0x01);
+        success = 1;
     }
     // printf("%x: %s %d %d\n", byte, op, *D, *W);
+    return success;
 }
 
 void parse_reg(uint8_t byte, uint8_t W, char out[])
@@ -107,11 +111,9 @@ void parse_byte2(u_int8_t byte, uint8_t W, uint8_t D, char out[])
     // printf("%d: %d %d %s %d %s\n", byte, MOD, REG, regout, RM, rmout);
 }
 
-void immediate_to_reg(u_int8_t byte, uint8_t W, uint8_t REG, char out[]) {
-    char regout[3];
-    parse_reg(REG, W, regout);    
+void immediate_to_reg(u_int8_t byte, uint8_t W, uint8_t REG, char regout[]) {
+    parse_reg(REG, W, regout);
     // printf("regout: %d\n", (int8_t)byte);
-    sprintf(out, "%s, %u", regout, byte);
 }
 
 int main(int argc, char *argv[])
@@ -128,6 +130,11 @@ int main(int argc, char *argv[])
     }
 }
 
+void print_line(char lineout[], char opout[], char rout[]) {
+    sprintf(lineout, "%s %s", opout, rout);
+    puts(lineout);
+}
+
 int read_file(const char *fname)
 {
     int is_ok = EXIT_FAILURE;
@@ -142,34 +149,55 @@ int read_file(const char *fname)
     int c, i = 0; // note: int, not char, required to handle EOF
     uint8_t W, D, REG = 0;
     char opout[4];
-    char rout[8];
-    char lineout[14];
+    char rout[12];
+    char lineout[18];
+    char regout[3];
+    uint8_t tc = 0;
     puts("bits 16\n");
     while ((c = fgetc(fp)) != EOF)
     {
         #ifdef CAT
-            printf("%x ", c);
-            if (i % 2) {
+            if (parse_byte1(c, &W, &D, &REG, opout)) {
                 printf("\n");
             }
-        #else        
-        switch (i % 2)
+            printf("%02x", c);
+        #else
+        switch (i)
         {
         case 0:
             parse_byte1(c, &W, &D, &REG, opout);
+            i++;
             break;
         case 1:
-            if (REG)
-                immediate_to_reg(c, W, REG, rout);
-            else
+            if (REG) {
+                immediate_to_reg(c, W, REG, regout);
+                if (W == 0) {
+                    sprintf(rout, "%s, %u", regout, c);
+                    print_line(lineout, opout, rout);
+                    i = 0;
+                    REG = 0;
+                }
+                else {
+                    tc = c;
+                    i++;
+                }
+            }
+            else {
                 parse_byte2(c, W, D, rout);
-            sprintf(lineout, "%s %s", opout, rout);
-            puts(lineout);
-            REG = 0;
+                print_line(lineout, opout, rout);
+                i = 0;
+            }
             break;
-        }        
+        case 2:
+            if (REG) {                
+                sprintf(rout, "%s, %d", regout, (c << 8) + tc);                
+                print_line(lineout, opout, rout);
+                REG = 0;
+                i = 0;
+            }
+            break;
+        }
         #endif
-        i++;
     }
     puts("");
     if (ferror(fp))
