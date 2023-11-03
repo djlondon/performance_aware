@@ -8,28 +8,38 @@
 /*
 XXXXXXXX | XX  XXX XXX
 100010DW | MOD REG R/M
+1011WREG | data | data (if W=1)
 */
 
-const int MAX_BYTES = 512;
+// #define CAT
 
 int read_file(const char *fname);
 
-void parse_byte1(uint8_t byte, uint8_t *W, uint8_t *D, char *out)
-{
-    // first 6 bytes determine operand
-    uint8_t opcode = byte >> 2;
-    // 2nd last byte
-    *D = (byte & 0x02) >> 1;
-    // last byte
-    *W = (byte & 0x01);
-    if (opcode == 0b100010)
+void parse_byte1(uint8_t byte, uint8_t *W, uint8_t *D, u_int8_t *REG, char *out);
+
+void parse_byte2(u_int8_t byte, uint8_t W, uint8_t D, char out[]);
+
+void parse_byte1(uint8_t byte, uint8_t *W, uint8_t *D, uint8_t *REG, char *out)
+{   
+    /* 1011WREG */
+    if (byte >> 4 == 0b1011) {
+        sprintf(out, "mov");        
+        *W = (byte >> 3) & 0x01;    
+        *REG = byte & 0x07;
+    }
+    /* 100010DW */
+    else if (byte >> 2 == 0b100010)
     {
         sprintf(out, "mov");
+        // 2nd last byte
+        *D = (byte & 0x02) >> 1;
+        // last byte
+        *W = (byte & 0x01);
     }
     // printf("%x: %s %d %d\n", byte, op, *D, *W);
 }
 
-void parse_reg(uint8_t byte, uint8_t W, char out[3])
+void parse_reg(uint8_t byte, uint8_t W, char out[])
 {
     if (byte == 0 || (byte == 4 && W == 0))
         out[0] = 'a';
@@ -97,6 +107,13 @@ void parse_byte2(u_int8_t byte, uint8_t W, uint8_t D, char out[])
     // printf("%d: %d %d %s %d %s\n", byte, MOD, REG, regout, RM, rmout);
 }
 
+void immediate_to_reg(u_int8_t byte, uint8_t W, uint8_t REG, char out[]) {
+    char regout[3];
+    parse_reg(REG, W, regout);    
+    // printf("regout: %d\n", (int8_t)byte);
+    sprintf(out, "%s, %u", regout, byte);
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 2)
@@ -123,24 +140,35 @@ int read_file(const char *fname)
     }
 
     int c, i = 0; // note: int, not char, required to handle EOF
-    uint8_t W, D = 0;
+    uint8_t W, D, REG = 0;
     char opout[4];
     char rout[8];
     char lineout[14];
     puts("bits 16\n");
     while ((c = fgetc(fp)) != EOF)
-    {        
+    {
+        #ifdef CAT
+            printf("%x ", c);
+            if (i % 2) {
+                printf("\n");
+            }
+        #else        
         switch (i % 2)
         {
         case 0:
-            parse_byte1(c, &W, &D, opout);
+            parse_byte1(c, &W, &D, &REG, opout);
             break;
         case 1:
-            parse_byte2(c, W, D, rout);
+            if (REG)
+                immediate_to_reg(c, W, REG, rout);
+            else
+                parse_byte2(c, W, D, rout);
             sprintf(lineout, "%s %s", opout, rout);
             puts(lineout);
+            REG = 0;
             break;
-        }
+        }        
+        #endif
         i++;
     }
     puts("");
