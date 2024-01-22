@@ -37,6 +37,7 @@ pub fn main() !void {
             else => |leftover_err| return leftover_err,
         }
     }
+    print("bits 16\n\n", .{});
     print("{s}\n", .{list.items});
 }
 
