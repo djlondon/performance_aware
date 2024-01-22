@@ -5,33 +5,160 @@ const print = std.debug.print;
 const fmt = std.fmt;
 const ArrayList = std.ArrayList;
 
-// 0-- -- -- -- 1--- --- -- 3-- 4--
-//  10 00 10 DW  mod reg rm  LO  HI
-// reg/mem to/from reg/mem
-// if first_byte.startswith(100010)
-// D - direction, src => (REG) (R/M)
-// W - word (L,H) (X,P,I)
-// mod - 00 no LO/HI (unless R/M=110), 01 LO, 10 LOHI, 11 reg (no LO/HI)
+const Args = struct { filePath: []const u8 };
 
-// 1011WREG
-// if the first 4 bytes 1011 (0xB), then the next four represent WREG */
+fn processArgs() error{NoFile}!Args {
+    var args = std.process.args();
+    _ = args.skip();
+    const filePath = args.next() orelse return error.NoFile;
+    return Args{ .filePath = filePath };
+}
+
+fn readFile(filePath: []const u8) !std.fs.File.Reader {
+    const file = try std.fs.cwd().openFile(filePath, .{});
+    return file.reader();
+}
 
 pub fn main() !void {
+    const args = try processArgs();
+    const fileReader = try readFile(args.filePath);
+    defer fileReader.context.close();
     var buffer: [1000]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
     var list = ArrayList(u8).init(allocator);
     defer list.deinit();
-    try rmMap(0, 0, 0, &list);
+    while (true) {
+        var ins = Instruction.init(&fileReader, &list.writer());
+        if (ins) |*ins_| {
+            try ins_.parse();
+        } else |err| switch (err) {
+            error.EndOfStream => break,
+            else => |leftover_err| return leftover_err,
+        }
+    }
     print("{s}\n", .{list.items});
 }
 
-/// Given RM, MOD and W, determine the address
-/// Writes result to out
-/// If MOD = 011, this is the same as regMap
-fn rmMap(rm: u3, mod_: u2, W: u1, out: *std.ArrayList(u8)) !void {
+const InstructionType = enum {
+    /// Address to Address MOV instruction:
+    /// reg to/from mem or reg to/from reg
+    /// e.g. mov cx, bx; mov al, [bx + si]
+    /// ------10 76  543 210 [MOD=1|2] [--MOD=2]
+    /// 100010DW mod reg r/m LO......  HI......
+    /// RM=6 and mod=0 => direct address from HILO
+    AddrToAddr,
+    /// -------0 76  543 210 [MOD=1|2] [--MOD=2] ---- [--w=1]
+    /// 1100011W mod 000 r/m LO......  HI......  data  data
+    ImmediateToAddr,
+    /// +---3210 +------+ [--w=1]
+    /// 1011WREG data     data
+    ImmediateToReg,
+};
+
+const Instruction = struct {
+    const Self = @This();
+    fileReader: *const std.fs.File.Reader,
+    writer: *const ArrayList(u8).Writer,
+    instruction_type: InstructionType,
+    d: u1 = undefined,
+    w: u1 = undefined,
+    mod_: u2 = undefined,
+    reg: u3 = undefined,
+    rm: u3 = undefined,
+    disp_lo: u8 = undefined,
+    disp_hi: u8 = undefined,
+
+    pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer) !Self {
+        var instruction_type: InstructionType = undefined;
+        const byte = try fileReader.readByte();
+        if (byte >> 2 == 0b100010) {
+            instruction_type = InstructionType.AddrToAddr;
+        } else if (byte >> 1 == 0b1100011) {
+            instruction_type = InstructionType.ImmediateToAddr;
+        } else if (byte >> 4 == 0b1011) {
+            instruction_type = InstructionType.ImmediateToReg;
+        } else {
+            return error.UnimplementedInstruction;
+        }
+        var ret = Self{ .fileReader = fileReader, .writer = writer, .instruction_type = instruction_type };
+        ret.firstByte(byte);
+        return ret;
+    }
+
+    pub fn parse(self: *Self) !void {
+        self.secondByte(try self.fileReader.readByte());
+        switch (self.instruction_type) {
+            (InstructionType.AddrToAddr) => {
+                if (self.mod_ == 1 or self.mod_ == 2) {
+                    self.thirdByte(try self.fileReader.readByte());
+                }
+                if (self.mod_ == 2) {
+                    self.fourthByte(try self.fileReader.readByte());
+                }
+            },
+            else => return error.Uninmplemented,
+        }
+        try self.str();
+    }
+
+    fn str(self: *Self) !void {
+        var buffer: [30]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+        const allocator = fba.allocator();
+        var rm = ArrayList(u8).init(allocator);
+        defer rm.deinit();
+        try rmMap(self.rm, self.mod_, self.w, &rm.writer());
+        const reg = regMap(self.reg, self.w);
+        if (self.d == 1) {
+            try self.writer.print("mov {s}, {s}\n", .{ reg, rm.items });
+        } else {
+            try self.writer.print("mov {s}, {s}\n", .{ rm.items, reg });
+        }
+    }
+
+    fn firstByte(self: *Self, byte: u8) void {
+        switch (self.instruction_type) {
+            (InstructionType.AddrToAddr) => {
+                // 1000_10DW
+                self.d = @truncate(byte >> 1);
+                self.w = @truncate(byte);
+            },
+            (InstructionType.ImmediateToAddr) => {
+                // 1100_011W
+                self.w = @truncate(byte);
+            },
+            (InstructionType.ImmediateToReg) => {
+                // 1011WREG
+                self.reg = @truncate(byte);
+                self.w = @truncate(byte >> 3);
+            },
+        }
+    }
+
+    fn secondByte(self: *Self, byte: u8) void {
+        // 76  543 210
+        // MOD REG R/M
+        self.mod_ = @truncate(byte >> 6);
+        self.reg = @truncate(byte >> 3);
+        self.rm = @truncate(byte);
+    }
+
+    fn thirdByte(self: *Self, byte: u8) void {
+        self.disp_lo = byte;
+    }
+
+    fn fourthByte(self: *Self, byte: u8) void {
+        self.disp_hi = byte;
+    }
+};
+
+/// Given RM, MOD and W, determine the address.
+/// Writes result to out.
+/// If MOD = 011, this is the same as regMap.
+fn rmMap(rm: u3, mod_: u2, W: u1, writer: *const ArrayList(u8).Writer) !void {
     if (mod_ == 3) {
-        try out.appendSlice(&regMap(rm, W));
+        try writer.print("{s}", .{&regMap(rm, W)});
         return;
     }
     const ins = switch (rm) {
@@ -42,7 +169,7 @@ fn rmMap(rm: u3, mod_: u2, W: u1, out: *std.ArrayList(u8)) !void {
         4 => "si",
         5 => "di",
         // TODO: implement direct address
-        6 => if (mod_ == 0) "{}" else "bp",
+        6 => if (mod_ == 0) "DA" else "bp",
         7 => "bx",
     };
     // TODO: implement displacement
@@ -51,7 +178,7 @@ fn rmMap(rm: u3, mod_: u2, W: u1, out: *std.ArrayList(u8)) !void {
         2 => " + D16",
         else => "",
     };
-    try out.writer().print("[{s}{s}]", .{ ins, disp });
+    try writer.print("[{s}{s}]", .{ ins, disp });
 }
 
 /// Given REG and and W, determine the register
@@ -95,14 +222,13 @@ test "rmMap no displacement" {
         .{ .rm = 3, .out = "[bp + di]" },
         .{ .rm = 4, .out = "[si]" },
         .{ .rm = 5, .out = "[di]" },
-        .{ .rm = 6, .out = "[{}]" },
+        .{ .rm = 6, .out = "[DA]" },
         .{ .rm = 7, .out = "[bx]" },
     };
     for (inputs) |values| {
         var list = ArrayList(u8).init(std.testing.allocator);
         defer list.deinit();
-        try rmMap(values.rm, 0, 0, &list);
-        // print("{} {}", .{ @typeInfo(@TypeOf(list.items)), @typeInfo(@TypeOf(values.out)) });
+        try rmMap(values.rm, 0, 0, &list.writer());
         assert(mem.eql(u8, values.out, list.items));
     }
 }
