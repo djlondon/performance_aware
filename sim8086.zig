@@ -204,12 +204,13 @@ fn rmMap(rm: u3, mod_: u2, W: u1, disp_lo: u8, disp_hi: u8, writer: *const Array
         7 => "bx",
     };
     try writer.print("[{s}", .{ins});
-    switch (mod_) {
-        1 => try writer.print(" + {}]", .{disp_lo}),
-        2 => {
-            try writer.print(" + {}]", .{(@as(u16, disp_hi) << 8) + @as(u16, disp_lo)});
-        },
-        else => try writer.print("]", .{}),
+    if ((disp_lo == 0 and disp_hi == 0) or mod_ == 0) {
+        try writer.print("]", .{});
+    } else if (mod_ == 1) {
+        try writer.print(" + {}]", .{disp_lo});
+    } else if (mod_ == 2) {
+        // TODO: move this logic to byte parsing step
+        try writer.print(" + {}]", .{(@as(u16, disp_hi) << 8) + @as(u16, disp_lo)});
     }
 }
 
