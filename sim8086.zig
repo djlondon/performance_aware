@@ -92,10 +92,10 @@ const Instruction = struct {
         switch (self.instruction_type) {
             (InstructionType.AddrToAddr) => {
                 self.secondByte(try self.fileReader.readByte());
-                if (self.mod_ == 1 or self.mod_ == 2) {
+                if (self.mod_ == 1 or self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
                     self.thirdByte(try self.fileReader.readByte());
                 }
-                if (self.mod_ == 2) {
+                if (self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
                     self.fourthByte(try self.fileReader.readByte());
                 }
             },
@@ -191,18 +191,20 @@ fn rmMap(rm: u3, mod_: u2, W: u1, disp: u16, writer: *const ArrayList(u8).Writer
         try writer.print("{s}", .{&regMap(rm, W)});
         return;
     }
-    const ins = switch (rm) {
-        0 => "bx + si",
-        1 => "bx + di",
-        2 => "bp + si",
-        3 => "bp + di",
-        4 => "si",
-        5 => "di",
-        // TODO: implement direct address
-        6 => if (mod_ == 0) "DA" else "bp",
-        7 => "bx",
-    };
-    try writer.print("[{s}", .{ins});
+    if (rm == 6 and mod_ == 0) {
+        try writer.print("[{}", .{disp});
+    } else {
+        try writer.print("[{s}", .{switch (rm) {
+            0 => "bx + si",
+            1 => "bx + di",
+            2 => "bp + si",
+            3 => "bp + di",
+            4 => "si",
+            5 => "di",
+            6 => "bp",
+            7 => "bx",
+        }});
+    }
     if (disp == 0 or mod_ == 0) {
         try writer.print("]", .{});
     } else {
@@ -251,7 +253,7 @@ test "rmMap no displacement" {
         .{ .rm = 3, .out = "[bp + di]" },
         .{ .rm = 4, .out = "[si]" },
         .{ .rm = 5, .out = "[di]" },
-        .{ .rm = 6, .out = "[DA]" },
+        .{ .rm = 6, .out = "[0]" },
         .{ .rm = 7, .out = "[bx]" },
     };
     for (inputs) |values| {
