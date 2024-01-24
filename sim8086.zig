@@ -67,8 +67,7 @@ const Instruction = struct {
     mod_: u2 = undefined,
     reg: u3 = undefined,
     rm: u3 = undefined,
-    disp_lo: u8 = undefined,
-    disp_hi: u8 = undefined,
+    disp: u16 = undefined,
     data_lo: i8 = undefined,
     data: i16 = undefined,
 
@@ -119,7 +118,7 @@ const Instruction = struct {
         defer rm.deinit();
         switch (self.instruction_type) {
             (InstructionType.AddrToAddr) => {
-                try rmMap(self.rm, self.mod_, self.w, self.disp_lo, self.disp_hi, &rm.writer());
+                try rmMap(self.rm, self.mod_, self.w, self.disp, &rm.writer());
                 const reg = regMap(self.reg, self.w);
                 if (self.d == 1) {
                     try self.writer.print("mov {s}, {s}\n", .{ reg, rm.items });
@@ -167,11 +166,11 @@ const Instruction = struct {
     }
 
     fn thirdByte(self: *Self, byte: u8) void {
-        self.disp_lo = byte;
+        self.disp = byte;
     }
 
     fn fourthByte(self: *Self, byte: u8) void {
-        self.disp_hi = byte;
+        self.disp += (@as(u16, byte) << 8);
     }
 
     fn immRegSecondByte(self: *Self, byte: u8) void {
@@ -187,7 +186,7 @@ const Instruction = struct {
 /// Given RM, MOD and W, determine the address.
 /// Writes result to out.
 /// If MOD = 011, this is the same as regMap.
-fn rmMap(rm: u3, mod_: u2, W: u1, disp_lo: u8, disp_hi: u8, writer: *const ArrayList(u8).Writer) !void {
+fn rmMap(rm: u3, mod_: u2, W: u1, disp: u16, writer: *const ArrayList(u8).Writer) !void {
     if (mod_ == 3) {
         try writer.print("{s}", .{&regMap(rm, W)});
         return;
@@ -204,13 +203,10 @@ fn rmMap(rm: u3, mod_: u2, W: u1, disp_lo: u8, disp_hi: u8, writer: *const Array
         7 => "bx",
     };
     try writer.print("[{s}", .{ins});
-    if ((disp_lo == 0 and disp_hi == 0) or mod_ == 0) {
+    if (disp == 0 or mod_ == 0) {
         try writer.print("]", .{});
-    } else if (mod_ == 1) {
-        try writer.print(" + {}]", .{disp_lo});
-    } else if (mod_ == 2) {
-        // TODO: move this logic to byte parsing step
-        try writer.print(" + {}]", .{(@as(u16, disp_hi) << 8) + @as(u16, disp_lo)});
+    } else {
+        try writer.print(" + {}]", .{disp});
     }
 }
 
@@ -261,7 +257,7 @@ test "rmMap no displacement" {
     for (inputs) |values| {
         var list = ArrayList(u8).init(std.testing.allocator);
         defer list.deinit();
-        try rmMap(values.rm, 0, 0, 0, 0, &list.writer());
+        try rmMap(values.rm, 0, 0, 0, &list.writer());
         assert(mem.eql(u8, values.out, list.items));
     }
 }
@@ -280,26 +276,7 @@ test "rmMap displacement" {
     for (inputs) |values| {
         var list = ArrayList(u8).init(std.testing.allocator);
         defer list.deinit();
-        try rmMap(values.rm, 2, 0, 0b1, 0b1, &list.writer());
-        assert(mem.eql(u8, values.out, list.items));
-    }
-}
-
-test "rmMap lo displacement" {
-    const TestVal = struct { rm: u3, out: []const u8 };
-    const inputs = [_]TestVal{
-        .{ .rm = 0, .out = "[bx + si + 124]" },
-        .{ .rm = 1, .out = "[bx + di + 124]" },
-        .{ .rm = 2, .out = "[bp + si + 124]" },
-        .{ .rm = 3, .out = "[bp + di + 124]" },
-        .{ .rm = 4, .out = "[si + 124]" },
-        .{ .rm = 5, .out = "[di + 124]" },
-        .{ .rm = 7, .out = "[bx + 124]" },
-    };
-    for (inputs) |values| {
-        var list = ArrayList(u8).init(std.testing.allocator);
-        defer list.deinit();
-        try rmMap(values.rm, 1, 0, 124, 0, &list.writer());
+        try rmMap(values.rm, 2, 0, 257, &list.writer());
         assert(mem.eql(u8, values.out, list.items));
     }
 }
