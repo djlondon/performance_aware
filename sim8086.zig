@@ -69,6 +69,8 @@ const Instruction = struct {
     rm: u3 = undefined,
     disp_lo: u8 = undefined,
     disp_hi: u8 = undefined,
+    data_lo: i8 = undefined,
+    data: i16 = undefined,
 
     pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer) !Self {
         var instruction_type: InstructionType = undefined;
@@ -88,14 +90,20 @@ const Instruction = struct {
     }
 
     pub fn parse(self: *Self) !void {
-        self.secondByte(try self.fileReader.readByte());
         switch (self.instruction_type) {
             (InstructionType.AddrToAddr) => {
+                self.secondByte(try self.fileReader.readByte());
                 if (self.mod_ == 1 or self.mod_ == 2) {
                     self.thirdByte(try self.fileReader.readByte());
                 }
                 if (self.mod_ == 2) {
                     self.fourthByte(try self.fileReader.readByte());
+                }
+            },
+            (InstructionType.ImmediateToReg) => {
+                self.immRegSecondByte(try self.fileReader.readByte());
+                if (self.w == 1) {
+                    self.immRegThirdByte(try self.fileReader.readByte());
                 }
             },
             else => return error.Uninmplemented,
@@ -109,12 +117,25 @@ const Instruction = struct {
         const allocator = fba.allocator();
         var rm = ArrayList(u8).init(allocator);
         defer rm.deinit();
-        try rmMap(self.rm, self.mod_, self.w, self.disp_lo, self.disp_hi, &rm.writer());
-        const reg = regMap(self.reg, self.w);
-        if (self.d == 1) {
-            try self.writer.print("mov {s}, {s}\n", .{ reg, rm.items });
-        } else {
-            try self.writer.print("mov {s}, {s}\n", .{ rm.items, reg });
+        switch (self.instruction_type) {
+            (InstructionType.AddrToAddr) => {
+                try rmMap(self.rm, self.mod_, self.w, self.disp_lo, self.disp_hi, &rm.writer());
+                const reg = regMap(self.reg, self.w);
+                if (self.d == 1) {
+                    try self.writer.print("mov {s}, {s}\n", .{ reg, rm.items });
+                } else {
+                    try self.writer.print("mov {s}, {s}\n", .{ rm.items, reg });
+                }
+            },
+            (InstructionType.ImmediateToReg) => {
+                const reg = regMap(self.reg, self.w);
+                const data = switch (self.w) {
+                    0 => self.data_lo,
+                    1 => self.data,
+                };
+                try self.writer.print("mov {s}, {}\n", .{ reg, data });
+            },
+            else => return error.Uninmplemented,
         }
     }
 
@@ -151,6 +172,15 @@ const Instruction = struct {
 
     fn fourthByte(self: *Self, byte: u8) void {
         self.disp_hi = byte;
+    }
+
+    fn immRegSecondByte(self: *Self, byte: u8) void {
+        self.data_lo = @bitCast(byte);
+        self.data = byte;
+    }
+
+    fn immRegThirdByte(self: *Self, byte: u8) void {
+        self.data += (@as(i16, byte) << 8);
     }
 };
 
@@ -307,11 +337,4 @@ test "word regMap" {
         const out = regMap(values.rm, 1);
         assert(mem.eql(u8, &out, values.out));
     }
-}
-
-test "byte concat" {
-    const lo: u8 = 0b1;
-    const hi: u8 = 0b1;
-    try std.testing.expectEqual(256, @as(u16, hi) << 8);
-    try std.testing.expectEqual(257, (@as(u16, hi) << 8) + lo);
 }
