@@ -109,7 +109,7 @@ const Instruction = struct {
         const allocator = fba.allocator();
         var rm = ArrayList(u8).init(allocator);
         defer rm.deinit();
-        try rmMap(self.rm, self.mod_, self.w, &rm.writer());
+        try rmMap(self.rm, self.mod_, self.w, self.disp_lo, self.disp_hi, &rm.writer());
         const reg = regMap(self.reg, self.w);
         if (self.d == 1) {
             try self.writer.print("mov {s}, {s}\n", .{ reg, rm.items });
@@ -157,7 +157,7 @@ const Instruction = struct {
 /// Given RM, MOD and W, determine the address.
 /// Writes result to out.
 /// If MOD = 011, this is the same as regMap.
-fn rmMap(rm: u3, mod_: u2, W: u1, writer: *const ArrayList(u8).Writer) !void {
+fn rmMap(rm: u3, mod_: u2, W: u1, disp_lo: u8, disp_hi: u8, writer: *const ArrayList(u8).Writer) !void {
     if (mod_ == 3) {
         try writer.print("{s}", .{&regMap(rm, W)});
         return;
@@ -173,13 +173,14 @@ fn rmMap(rm: u3, mod_: u2, W: u1, writer: *const ArrayList(u8).Writer) !void {
         6 => if (mod_ == 0) "DA" else "bp",
         7 => "bx",
     };
-    // TODO: implement displacement
-    const disp = switch (mod_) {
-        1 => " + D8",
-        2 => " + D16",
-        else => "",
-    };
-    try writer.print("[{s}{s}]", .{ ins, disp });
+    try writer.print("[{s}", .{ins});
+    switch (mod_) {
+        1 => try writer.print(" + {}]", .{disp_lo}),
+        2 => {
+            try writer.print(" + {}]", .{(@as(u16, disp_hi) << 8) + @as(u16, disp_lo)});
+        },
+        else => try writer.print("]", .{}),
+    }
 }
 
 /// Given REG and and W, determine the register
@@ -229,7 +230,45 @@ test "rmMap no displacement" {
     for (inputs) |values| {
         var list = ArrayList(u8).init(std.testing.allocator);
         defer list.deinit();
-        try rmMap(values.rm, 0, 0, &list.writer());
+        try rmMap(values.rm, 0, 0, 0, 0, &list.writer());
+        assert(mem.eql(u8, values.out, list.items));
+    }
+}
+
+test "rmMap displacement" {
+    const TestVal = struct { rm: u3, out: []const u8 };
+    const inputs = [_]TestVal{
+        .{ .rm = 0, .out = "[bx + si + 257]" },
+        .{ .rm = 1, .out = "[bx + di + 257]" },
+        .{ .rm = 2, .out = "[bp + si + 257]" },
+        .{ .rm = 3, .out = "[bp + di + 257]" },
+        .{ .rm = 4, .out = "[si + 257]" },
+        .{ .rm = 5, .out = "[di + 257]" },
+        .{ .rm = 7, .out = "[bx + 257]" },
+    };
+    for (inputs) |values| {
+        var list = ArrayList(u8).init(std.testing.allocator);
+        defer list.deinit();
+        try rmMap(values.rm, 2, 0, 0b1, 0b1, &list.writer());
+        assert(mem.eql(u8, values.out, list.items));
+    }
+}
+
+test "rmMap lo displacement" {
+    const TestVal = struct { rm: u3, out: []const u8 };
+    const inputs = [_]TestVal{
+        .{ .rm = 0, .out = "[bx + si + 124]" },
+        .{ .rm = 1, .out = "[bx + di + 124]" },
+        .{ .rm = 2, .out = "[bp + si + 124]" },
+        .{ .rm = 3, .out = "[bp + di + 124]" },
+        .{ .rm = 4, .out = "[si + 124]" },
+        .{ .rm = 5, .out = "[di + 124]" },
+        .{ .rm = 7, .out = "[bx + 124]" },
+    };
+    for (inputs) |values| {
+        var list = ArrayList(u8).init(std.testing.allocator);
+        defer list.deinit();
+        try rmMap(values.rm, 1, 0, 124, 0, &list.writer());
         assert(mem.eql(u8, values.out, list.items));
     }
 }
@@ -268,4 +307,11 @@ test "word regMap" {
         const out = regMap(values.rm, 1);
         assert(mem.eql(u8, &out, values.out));
     }
+}
+
+test "byte concat" {
+    const lo: u8 = 0b1;
+    const hi: u8 = 0b1;
+    try std.testing.expectEqual(256, @as(u16, hi) << 8);
+    try std.testing.expectEqual(257, (@as(u16, hi) << 8) + lo);
 }
