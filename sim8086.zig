@@ -14,7 +14,7 @@ fn processArgs() error{NoFile}!Args {
     return Args{ .filePath = filePath };
 }
 
-fn readFile(filePath: []const u8) !std.io.AnyReader {
+fn readFile(filePath: []const u8) !std.fs.File.Reader {
     const file = try std.fs.cwd().openFile(filePath, .{});
     return file.reader();
 }
@@ -59,7 +59,7 @@ const InstructionType = enum {
 
 const Instruction = struct {
     const Self = @This();
-    fileReader: *const std.io.AnyReader,
+    fileReader: *const std.fs.File.Reader,
     writer: *const ArrayList(u8).Writer,
     instruction_type: InstructionType,
     d: u1 = undefined,
@@ -71,7 +71,7 @@ const Instruction = struct {
     data_lo: i8 = undefined,
     data: i16 = undefined,
 
-    pub fn init(fileReader: *const std.io.AnyReader, writer: *const ArrayList(u8).Writer) !Self {
+    pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer) !Self {
         var instruction_type: InstructionType = undefined;
         const byte = try fileReader.readByte();
         if (byte >> 2 == 0b100010) {
