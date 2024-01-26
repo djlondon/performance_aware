@@ -55,6 +55,12 @@ const InstructionType = enum {
     /// +---3210 +------+ [--w=1]
     /// 1011WREG data     data
     ImmediateToReg,
+    /// +------0 +------+ +------+
+    /// 1010000W addr-lo addr-hi
+    MemToAcc,
+    /// +------0 +------+ +------+
+    /// 1010001W addr-lo addr-hi
+    AccToMem,
 };
 
 const Instruction = struct {
@@ -80,6 +86,10 @@ const Instruction = struct {
             instruction_type = InstructionType.ImmediateToAddr;
         } else if (byte >> 4 == 0b1011) {
             instruction_type = InstructionType.ImmediateToReg;
+        } else if (byte >> 1 == 0b1010000) {
+            instruction_type = InstructionType.MemToAcc;
+        } else if (byte >> 1 == 0b1010001) {
+            instruction_type = InstructionType.AccToMem;
         } else {
             return error.UnimplementedInstruction;
         }
@@ -90,7 +100,7 @@ const Instruction = struct {
 
     pub fn parse(self: *Self) !void {
         switch (self.instruction_type) {
-            (InstructionType.AddrToAddr) => {
+            InstructionType.AddrToAddr => {
                 self.secondByte(try self.fileReader.readByte());
                 if (self.mod_ == 1 or self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
                     self.thirdByte(try self.fileReader.readByte());
@@ -99,13 +109,13 @@ const Instruction = struct {
                     self.fourthByte(try self.fileReader.readByte());
                 }
             },
-            (InstructionType.ImmediateToReg) => {
+            InstructionType.ImmediateToReg => {
                 self.immRegSecondByte(try self.fileReader.readByte());
                 if (self.w == 1) {
                     self.immRegThirdByte(try self.fileReader.readByte());
                 }
             },
-            (InstructionType.ImmediateToAddr) => {
+            InstructionType.ImmediateToAddr => {
                 self.immAddrSecondByte(try self.fileReader.readByte());
                 if (self.mod_ == 1 or self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
                     self.thirdByte(try self.fileReader.readByte());
@@ -117,6 +127,10 @@ const Instruction = struct {
                 if (self.w == 1) {
                     self.immRegThirdByte(try self.fileReader.readByte());
                 }
+            },
+            InstructionType.MemToAcc, InstructionType.AccToMem => {
+                self.immRegSecondByte(try self.fileReader.readByte());
+                self.immRegThirdByte(try self.fileReader.readByte());
             },
         }
         try self.str();
@@ -154,21 +168,27 @@ const Instruction = struct {
                 };
                 try self.writer.print("mov {s}, {}\n", .{ rm.items, data });
             },
+            InstructionType.MemToAcc => {
+                try self.writer.print("mov ax, [{}]\n", .{self.data});
+            },
+            InstructionType.AccToMem => {
+                try self.writer.print("mov [{}], ax\n", .{self.data});
+            },
         }
     }
 
     fn firstByte(self: *Self, byte: u8) void {
         switch (self.instruction_type) {
-            (InstructionType.AddrToAddr) => {
+            InstructionType.AddrToAddr => {
                 // 1000_10DW
                 self.d = @truncate(byte >> 1);
                 self.w = @truncate(byte);
             },
-            (InstructionType.ImmediateToAddr) => {
-                // 1100_011W
+            InstructionType.ImmediateToAddr, InstructionType.MemToAcc, InstructionType.AccToMem => {
+                // XXXX_XXXW
                 self.w = @truncate(byte);
             },
-            (InstructionType.ImmediateToReg) => {
+            InstructionType.ImmediateToReg => {
                 // 1011WREG
                 self.reg = @truncate(byte);
                 self.w = @truncate(byte >> 3);
