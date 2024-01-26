@@ -38,7 +38,7 @@ pub fn main() !void {
         }
     }
     print("bits 16\n\n", .{});
-    print("{s}\n", .{list.items});
+    print("{s}", .{list.items});
 }
 
 const InstructionType = enum {
@@ -73,7 +73,8 @@ const Instruction = struct {
     mod_: u2 = undefined,
     reg: u3 = undefined,
     rm: u3 = undefined,
-    disp: u16 = undefined,
+    disp_lo: i8 = undefined,
+    disp: i16 = undefined,
     data_lo: i8 = undefined,
     data: i16 = undefined,
 
@@ -144,7 +145,11 @@ const Instruction = struct {
         defer rm.deinit();
         switch (self.instruction_type) {
             (InstructionType.AddrToAddr) => {
-                try rmMap(self.rm, self.mod_, self.w, self.disp, &rm.writer());
+                const disp: i16 = switch (self.mod_) {
+                    1 => self.disp_lo,
+                    else => self.disp,
+                };
+                try rmMap(self.rm, self.mod_, self.w, disp, &rm.writer());
                 const reg = regMap(self.reg, self.w);
                 if (self.d == 1) {
                     try self.writer.print("mov {s}, {s}\n", .{ reg, rm.items });
@@ -166,7 +171,8 @@ const Instruction = struct {
                     0 => self.data_lo,
                     1 => self.data,
                 };
-                try self.writer.print("mov {s}, {}\n", .{ rm.items, data });
+                const size = if (self.w == 1) "word" else "byte";
+                try self.writer.print("mov {s}, {s} {}\n", .{ rm.items, size, data });
             },
             InstructionType.MemToAcc => {
                 try self.writer.print("mov ax, [{}]\n", .{self.data});
@@ -205,11 +211,12 @@ const Instruction = struct {
     }
 
     fn thirdByte(self: *Self, byte: u8) void {
+        self.disp_lo = @bitCast(byte);
         self.disp = byte;
     }
 
     fn fourthByte(self: *Self, byte: u8) void {
-        self.disp += (@as(u16, byte) << 8);
+        self.disp += (@as(i16, byte) << 8);
     }
 
     fn immRegSecondByte(self: *Self, byte: u8) void {
@@ -232,7 +239,7 @@ const Instruction = struct {
 /// Given RM, MOD and W, determine the address.
 /// Writes result to out.
 /// If MOD = 011, this is the same as regMap.
-fn rmMap(rm: u3, mod_: u2, W: u1, disp: u16, writer: *const ArrayList(u8).Writer) !void {
+fn rmMap(rm: u3, mod_: u2, W: u1, disp: i16, writer: *const ArrayList(u8).Writer) !void {
     if (mod_ == 3) {
         try writer.print("{s}", .{&regMap(rm, W)});
         return;
