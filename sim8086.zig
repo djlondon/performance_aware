@@ -105,7 +105,19 @@ const Instruction = struct {
                     self.immRegThirdByte(try self.fileReader.readByte());
                 }
             },
-            else => return error.Uninmplemented,
+            (InstructionType.ImmediateToAddr) => {
+                self.immAddrSecondByte(try self.fileReader.readByte());
+                if (self.mod_ == 1 or self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
+                    self.thirdByte(try self.fileReader.readByte());
+                }
+                if (self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
+                    self.fourthByte(try self.fileReader.readByte());
+                }
+                self.immRegSecondByte(try self.fileReader.readByte());
+                if (self.w == 1) {
+                    self.immRegThirdByte(try self.fileReader.readByte());
+                }
+            },
         }
         try self.str();
     }
@@ -134,7 +146,14 @@ const Instruction = struct {
                 };
                 try self.writer.print("mov {s}, {}\n", .{ reg, data });
             },
-            else => return error.Uninmplemented,
+            (InstructionType.ImmediateToAddr) => {
+                try rmMap(self.rm, self.mod_, self.w, self.disp, &rm.writer());
+                const data = switch (self.w) {
+                    0 => self.data_lo,
+                    1 => self.data,
+                };
+                try self.writer.print("mov {s}, {}\n", .{ rm.items, data });
+            },
         }
     }
 
@@ -180,6 +199,13 @@ const Instruction = struct {
 
     fn immRegThirdByte(self: *Self, byte: u8) void {
         self.data += (@as(i16, byte) << 8);
+    }
+
+    fn immAddrSecondByte(self: *Self, byte: u8) void {
+        // 76  543 210
+        // MOD 000 R/M
+        self.mod_ = @truncate(byte >> 6);
+        self.rm = @truncate(byte);
     }
 };
 
