@@ -174,11 +174,16 @@ const Instruction = struct {
                 const size = if (self.w == 1) "word" else "byte";
                 try self.writer.print("mov {s}, {s} {}\n", .{ rm.items, size, data });
             },
-            InstructionType.MemToAcc => {
-                try self.writer.print("mov ax, [{}]\n", .{self.data});
-            },
-            InstructionType.AccToMem => {
-                try self.writer.print("mov [{}], ax\n", .{self.data});
+            InstructionType.MemToAcc, InstructionType.AccToMem => {
+                const acc = switch(self.w) {
+                    0 => "al",
+                    1 => "ax",
+                };
+                if (self.instruction_type == InstructionType.MemToAcc) {
+                    try self.writer.print("mov {s}, [{}]\n", .{acc, self.data});
+                } else {
+                    try self.writer.print("mov [{}], {s}\n", .{self.data, acc});
+                }
             },
         }
     }
