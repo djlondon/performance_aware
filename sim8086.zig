@@ -117,7 +117,7 @@ const Instruction = struct {
                 }
             },
             InstructionType.ImmediateToAddr => {
-                self.immAddrSecondByte(try self.fileReader.readByte());
+                try self.immAddrSecondByte(try self.fileReader.readByte());
                 if (self.mod_ == 1 or self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
                     self.thirdByte(try self.fileReader.readByte());
                 }
@@ -228,9 +228,12 @@ const Instruction = struct {
         self.data += (@as(i16, byte) << 8);
     }
 
-    fn immAddrSecondByte(self: *Self, byte: u8) void {
+    fn immAddrSecondByte(self: *Self, byte: u8) !void {
         // 76  543 210
         // MOD 000 R/M
+        if (@as(u3, @truncate(byte >> 3)) != 0) {
+            return error.InvalidByte;
+        }
         self.mod_ = @truncate(byte >> 6);
         self.rm = @truncate(byte);
     }
