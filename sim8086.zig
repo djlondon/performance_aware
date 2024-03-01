@@ -63,11 +63,52 @@ const InstructionType = enum {
     AccToMem,
 };
 
+const Op = enum {
+    MOV,
+    ADD,
+    SUB,
+    CMP,
+
+    pub fn str(self: Op) *const [3:0]u8 {
+        return switch (self) {
+            Op.MOV => "mov",
+            Op.ADD => "add",
+            Op.SUB => "sub",
+            Op.CMP => "cmp",
+        };
+    }
+};
+
+const InstructionTable = struct {
+    pattern: u8,
+    shift: u3,
+    ins: InstructionType,
+    op: Op,
+};
+const table = [_]InstructionTable{
+    .{ .pattern = 0b0100010, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.MOV },
+    .{ .pattern = 0b1100011, .shift = 1, .ins = InstructionType.ImmediateToAddr, .op = Op.MOV },
+    .{ .pattern = 0b0001011, .shift = 4, .ins = InstructionType.ImmediateToReg, .op = Op.MOV },
+    .{ .pattern = 0b1010000, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.MOV },
+    .{ .pattern = 0b1010001, .shift = 1, .ins = InstructionType.AccToMem, .op = Op.MOV },
+    .{ .pattern = 0b0000000, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.ADD },
+    .{ .pattern = 0b0000010, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.ADD },
+    .{ .pattern = 0b0001010, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.SUB },
+    .{ .pattern = 0b0010110, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.SUB },
+    .{ .pattern = 0b0001110, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.CMP },
+    .{ .pattern = 0b0011110, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.CMP },
+    // In this case, the op is determined by the second byte, op can be ADD, SUB or CMP
+    .{ .pattern = 0b0100000, .shift = 2, .ins = InstructionType.ImmediateToAddr, .op = undefined },
+};
+
 const Instruction = struct {
     const Self = @This();
     fileReader: *const std.fs.File.Reader,
     writer: *const ArrayList(u8).Writer,
     instruction_type: InstructionType,
+    op: Op,
+    // TODO: implement s
+    s: u1 = undefined,
     d: u1 = undefined,
     w: u1 = undefined,
     mod_: u2 = undefined,
@@ -80,21 +121,19 @@ const Instruction = struct {
 
     pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer) !Self {
         var instruction_type: InstructionType = undefined;
+        var op: Op = undefined;
         const byte = try fileReader.readByte();
-        if (byte >> 2 == 0b100010) {
-            instruction_type = InstructionType.AddrToAddr;
-        } else if (byte >> 1 == 0b1100011) {
-            instruction_type = InstructionType.ImmediateToAddr;
-        } else if (byte >> 4 == 0b1011) {
-            instruction_type = InstructionType.ImmediateToReg;
-        } else if (byte >> 1 == 0b1010000) {
-            instruction_type = InstructionType.MemToAcc;
-        } else if (byte >> 1 == 0b1010001) {
-            instruction_type = InstructionType.AccToMem;
+
+        for (table) |t| {
+            if (byte >> t.shift == t.pattern) {
+                instruction_type = t.ins;
+                op = t.op;
+                break;
+            }
         } else {
             return error.UnimplementedInstruction;
         }
-        var ret = Self{ .fileReader = fileReader, .writer = writer, .instruction_type = instruction_type };
+        var ret = Self{ .fileReader = fileReader, .writer = writer, .instruction_type = instruction_type, .op = op };
         ret.firstByte(byte);
         return ret;
     }
@@ -152,9 +191,9 @@ const Instruction = struct {
                 try rmMap(self.rm, self.mod_, self.w, disp, &rm.writer());
                 const reg = regMap(self.reg, self.w);
                 if (self.d == 1) {
-                    try self.writer.print("mov {s}, {s}\n", .{ reg, rm.items });
+                    try self.writer.print("{s} {s}, {s}\n", .{ self.op.str(), reg, rm.items });
                 } else {
-                    try self.writer.print("mov {s}, {s}\n", .{ rm.items, reg });
+                    try self.writer.print("{s} {s}, {s}\n", .{ self.op.str(), rm.items, reg });
                 }
             },
             (InstructionType.ImmediateToReg) => {
@@ -163,7 +202,7 @@ const Instruction = struct {
                     0 => self.data_lo,
                     1 => self.data,
                 };
-                try self.writer.print("mov {s}, {}\n", .{ reg, data });
+                try self.writer.print("{s} {s}, {}\n", .{ self.op.str(), reg, data });
             },
             (InstructionType.ImmediateToAddr) => {
                 try rmMap(self.rm, self.mod_, self.w, self.disp, &rm.writer());
@@ -172,17 +211,17 @@ const Instruction = struct {
                     1 => self.data,
                 };
                 const size = if (self.w == 1) "word" else "byte";
-                try self.writer.print("mov {s}, {s} {}\n", .{ rm.items, size, data });
+                try self.writer.print("{s} {s}, {s} {}\n", .{ self.op.str(), rm.items, size, data });
             },
             InstructionType.MemToAcc, InstructionType.AccToMem => {
-                const acc = switch(self.w) {
+                const acc = switch (self.w) {
                     0 => "al",
                     1 => "ax",
                 };
                 if (self.instruction_type == InstructionType.MemToAcc) {
-                    try self.writer.print("mov {s}, [{}]\n", .{acc, self.data});
+                    try self.writer.print("{s} {s}, [{}]\n", .{ self.op.str(), acc, self.data });
                 } else {
-                    try self.writer.print("mov [{}], {s}\n", .{self.data, acc});
+                    try self.writer.print("{s} [{}], {s}\n", .{ self.op.str(), self.data, acc });
                 }
             },
         }
@@ -197,7 +236,11 @@ const Instruction = struct {
             },
             InstructionType.ImmediateToAddr, InstructionType.MemToAcc, InstructionType.AccToMem => {
                 // XXXX_XXXW
+                // XXXX_XXSW
                 self.w = @truncate(byte);
+                if (self.op != Op.MOV) {
+                    self.s = @truncate(byte >> 1);
+                }
             },
             InstructionType.ImmediateToReg => {
                 // 1011WREG
@@ -236,8 +279,14 @@ const Instruction = struct {
     fn immAddrSecondByte(self: *Self, byte: u8) !void {
         // 76  543 210
         // MOD 000 R/M
-        if (@as(u3, @truncate(byte >> 3)) != 0) {
-            return error.InvalidByte;
+        const mid: u3 = @truncate(byte >> 3);
+        if (self.op != Op.MOV) {
+            self.op = switch (mid) {
+                0 => Op.ADD,
+                5 => Op.SUB,
+                7 => Op.CMP,
+                else => return error.UnimplementedInstruction,
+            };
         }
         self.mod_ = @truncate(byte >> 6);
         self.rm = @truncate(byte);
