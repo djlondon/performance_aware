@@ -88,19 +88,19 @@ const InstructionTable = struct {
     op: Op,
 };
 const table = [_]InstructionTable{
-    .{ .pattern = 0b0100010, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.MOV },
-    .{ .pattern = 0b1100011, .shift = 1, .ins = InstructionType.ImmediateToAddr, .op = Op.MOV },
     .{ .pattern = 0b0001011, .shift = 4, .ins = InstructionType.ImmediateToReg, .op = Op.MOV },
+    .{ .pattern = 0b0100010, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.MOV },
+    // In this case, the op is determined by the second byte, op can be ADD, SUB or CMP
+    .{ .pattern = 0b100000, .shift = 2, .ins = InstructionType.ImmediateToAddr, .op = Op.UNDEF },
+    .{ .pattern = 0b0001110, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.CMP },
+    .{ .pattern = 0b0000000, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.ADD },
+    .{ .pattern = 0b0001010, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.SUB },
+    .{ .pattern = 0b1100011, .shift = 1, .ins = InstructionType.ImmediateToAddr, .op = Op.MOV },
     .{ .pattern = 0b1010000, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.MOV },
     .{ .pattern = 0b1010001, .shift = 1, .ins = InstructionType.AccToMem, .op = Op.MOV },
-    .{ .pattern = 0b0000000, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.ADD },
     .{ .pattern = 0b0000010, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.ADD },
-    .{ .pattern = 0b0001010, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.SUB },
     .{ .pattern = 0b0010110, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.SUB },
-    .{ .pattern = 0b0001110, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.CMP },
     .{ .pattern = 0b0011110, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.CMP },
-    // In this case, the op is determined by the second byte, op can be ADD, SUB or CMP
-    .{ .pattern = 0b0100000, .shift = 2, .ins = InstructionType.ImmediateToAddr, .op = undefined },
 };
 
 const Instruction = struct {
