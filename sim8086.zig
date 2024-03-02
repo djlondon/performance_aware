@@ -68,13 +68,15 @@ const Op = enum {
     ADD,
     SUB,
     CMP,
+    UNDEF,
 
-    pub fn str(self: Op) *const [3:0]u8 {
+    pub fn str(self: Op) !*const [3:0]u8 {
         return switch (self) {
             Op.MOV => "mov",
             Op.ADD => "add",
             Op.SUB => "sub",
             Op.CMP => "cmp",
+            Op.UNDEF => error.UndefinedOp,
         };
     }
 };
@@ -108,7 +110,7 @@ const Instruction = struct {
     instruction_type: InstructionType,
     op: Op,
     // TODO: implement s
-    s: u1 = undefined,
+    s: u1 = 0, // same as if doesn't exist
     d: u1 = undefined,
     w: u1 = undefined,
     mod_: u2 = undefined,
@@ -121,7 +123,7 @@ const Instruction = struct {
 
     pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer) !Self {
         var instruction_type: InstructionType = undefined;
-        var op: Op = undefined;
+        var op: Op = Op.UNDEF;
         const byte = try fileReader.readByte();
 
         for (table) |t| {
@@ -164,7 +166,8 @@ const Instruction = struct {
                     self.fourthByte(try self.fileReader.readByte());
                 }
                 self.immRegSecondByte(try self.fileReader.readByte());
-                if (self.w == 1) {
+                print("{}", .{self.s});
+                if (self.w == 1 and self.s == 0) {
                     self.immRegThirdByte(try self.fileReader.readByte());
                 }
             },
@@ -191,9 +194,9 @@ const Instruction = struct {
                 try rmMap(self.rm, self.mod_, self.w, disp, &rm.writer());
                 const reg = regMap(self.reg, self.w);
                 if (self.d == 1) {
-                    try self.writer.print("{s} {s}, {s}\n", .{ self.op.str(), reg, rm.items });
+                    try self.writer.print("{s} {s}, {s}\n", .{ try self.op.str(), reg, rm.items });
                 } else {
-                    try self.writer.print("{s} {s}, {s}\n", .{ self.op.str(), rm.items, reg });
+                    try self.writer.print("{s} {s}, {s}\n", .{ try self.op.str(), rm.items, reg });
                 }
             },
             (InstructionType.ImmediateToReg) => {
@@ -202,7 +205,7 @@ const Instruction = struct {
                     0 => self.data_lo,
                     1 => self.data,
                 };
-                try self.writer.print("{s} {s}, {}\n", .{ self.op.str(), reg, data });
+                try self.writer.print("{s} {s}, {}\n", .{ try self.op.str(), reg, data });
             },
             (InstructionType.ImmediateToAddr) => {
                 try rmMap(self.rm, self.mod_, self.w, self.disp, &rm.writer());
@@ -210,8 +213,8 @@ const Instruction = struct {
                     0 => self.data_lo,
                     1 => self.data,
                 };
-                const size = if (self.w == 1) "word" else "byte";
-                try self.writer.print("{s} {s}, {s} {}\n", .{ self.op.str(), rm.items, size, data });
+                const size = if (self.w == 1 and self.s == 0) "word" else "byte";
+                try self.writer.print("{s} {s}, {s} {}\n", .{ try self.op.str(), rm.items, size, data });
             },
             InstructionType.MemToAcc, InstructionType.AccToMem => {
                 const acc = switch (self.w) {
@@ -219,9 +222,9 @@ const Instruction = struct {
                     1 => "ax",
                 };
                 if (self.instruction_type == InstructionType.MemToAcc) {
-                    try self.writer.print("{s} {s}, [{}]\n", .{ self.op.str(), acc, self.data });
+                    try self.writer.print("{s} {s}, [{}]\n", .{ try self.op.str(), acc, self.data });
                 } else {
-                    try self.writer.print("{s} [{}], {s}\n", .{ self.op.str(), self.data, acc });
+                    try self.writer.print("{s} [{}], {s}\n", .{ try self.op.str(), self.data, acc });
                 }
             },
         }
@@ -234,13 +237,17 @@ const Instruction = struct {
                 self.d = @truncate(byte >> 1);
                 self.w = @truncate(byte);
             },
-            InstructionType.ImmediateToAddr, InstructionType.MemToAcc, InstructionType.AccToMem => {
-                // XXXX_XXXW
-                // XXXX_XXSW
+            InstructionType.ImmediateToAddr => {
                 self.w = @truncate(byte);
+                print("{b} {}", .{ byte, self.op });
                 if (self.op != Op.MOV) {
                     self.s = @truncate(byte >> 1);
                 }
+            },
+            InstructionType.MemToAcc, InstructionType.AccToMem => {
+                // XXXX_XXXW
+                // XXXX_XXSW
+                self.w = @truncate(byte);
             },
             InstructionType.ImmediateToReg => {
                 // 1011WREG
