@@ -23,22 +23,45 @@ pub fn main() !void {
     const args = try processArgs();
     const fileReader = try readFile(args.filePath);
     defer fileReader.context.close();
-    var buffer: [1000]u8 = undefined;
+    // TODO: does buffer size make sense here? investigate other allocators
+    var buffer: [4096]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
     var list = ArrayList(u8).init(allocator);
     defer list.deinit();
     while (true) {
-        var ins = Instruction.init(&fileReader, &list.writer());
-        if (ins) |*ins_| {
-            try ins_.parse();
-        } else |err| switch (err) {
-            error.EndOfStream => break,
-            else => |leftover_err| return leftover_err,
-        }
+        init(&fileReader, &list.writer()) catch |err| {
+            switch (err) {
+                error.EndOfStream => break,
+                else => |leftover_err| return leftover_err,
+            }
+        };
     }
+    // TODO: print to stdout not stderr
     print("bits 16\n\n", .{});
     print("{s}", .{list.items});
+}
+
+pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer) !void {
+    const byte = try fileReader.readByte();
+
+    for (jump_table) |t| {
+        if (byte == t.pattern) {
+            var ji = RETInstruction{ .fileReader = fileReader, .writer = writer, .op = t.op };
+            try ji.parse();
+            return;
+        }
+    }
+
+    for (table) |t| {
+        if (byte >> t.shift == t.pattern) {
+            var i = Instruction{ .fileReader = fileReader, .writer = writer, .instruction_type = t.ins, .op = t.op };
+            i.firstByte(byte);
+            try i.parse();
+            return;
+        }
+    }
+    return error.UnimplementedInstruction;
 }
 
 const InstructionType = enum {
@@ -84,6 +107,56 @@ const Op = enum {
     }
 };
 
+const RET = enum {
+    JNZ,
+    JE,
+    JL,
+    JLE,
+    JB,
+    JBE,
+    JP,
+    JO,
+    JS,
+    JNE,
+    JNL,
+    JG,
+    JNB,
+    JA,
+    JNP,
+    JNO,
+    JNS,
+    LOOP,
+    LOOPZ,
+    LOOPNZ,
+    JCXZ,
+
+    pub fn str(self: RET) []const u8 {
+        return switch (self) {
+            RET.JNZ => "jnz",
+            RET.JE => "je",
+            RET.JL => "jl",
+            RET.JLE => "jle",
+            RET.JB => "jb",
+            RET.JBE => "jbe",
+            RET.JP => "jp",
+            RET.JO => "jo",
+            RET.JS => "js",
+            RET.JNE => "jne",
+            RET.JNL => "jnl",
+            RET.JG => "jg",
+            RET.JNB => "jnb",
+            RET.JA => "ja",
+            RET.JNP => "jnp",
+            RET.JNO => "jno",
+            RET.JNS => "jns",
+            RET.LOOP => "loop",
+            RET.LOOPZ => "loopz",
+            RET.LOOPNZ => "loopnz",
+            RET.JCXZ => "jcxz",
+        };
+    }
+};
+
 const InstructionTable = struct {
     pattern: u8,
     shift: u3,
@@ -107,13 +180,59 @@ const table = [_]InstructionTable{
     .{ .pattern = 0b0011110, .shift = 1, .ins = InstructionType.ImmediateToAcc, .op = Op.CMP },
 };
 
+const RETInstructionTable = struct {
+    pattern: u8,
+    op: RET,
+};
+
+const jump_table = [_]RETInstructionTable{
+    .{ .pattern = 0b01110100, .op = RET.JE },
+    .{ .pattern = 0b01111100, .op = RET.JL },
+    .{ .pattern = 0b01111110, .op = RET.JLE },
+    .{ .pattern = 0b01110010, .op = RET.JB },
+    .{ .pattern = 0b01110110, .op = RET.JBE },
+    .{ .pattern = 0b01111010, .op = RET.JP },
+    .{ .pattern = 0b01110000, .op = RET.JO },
+    .{ .pattern = 0b01111000, .op = RET.JS },
+    .{ .pattern = 0b01110101, .op = RET.JNE },
+    .{ .pattern = 0b01111101, .op = RET.JNL },
+    .{ .pattern = 0b01111111, .op = RET.JG },
+    .{ .pattern = 0b01110011, .op = RET.JNB },
+    .{ .pattern = 0b01110111, .op = RET.JA },
+    .{ .pattern = 0b01111011, .op = RET.JNP },
+    .{ .pattern = 0b01110001, .op = RET.JNO },
+    .{ .pattern = 0b01111001, .op = RET.JNS },
+    .{ .pattern = 0b11100010, .op = RET.LOOP },
+    .{ .pattern = 0b11100001, .op = RET.LOOPZ },
+    .{ .pattern = 0b11100000, .op = RET.LOOPNZ },
+    .{ .pattern = 0b11100011, .op = RET.JCXZ },
+};
+
+const RETInstruction = struct {
+    const Self = @This();
+    fileReader: *const std.fs.File.Reader,
+    writer: *const ArrayList(u8).Writer,
+    op: RET,
+    offset: i8 = undefined,
+
+    pub fn parse(self: *Self) !void {
+        self.offset = @bitCast(try self.fileReader.readByte());
+        try self.str();
+    }
+
+    fn str(self: *Self) !void {
+        // nasm requires the offset to be in form $+2+(offset)
+        // where 2 represents the instruction length since all RET operations are 2 bytes long
+        try self.writer.print("{s} $+2+{}\n", .{ self.op.str(), self.offset });
+    }
+};
+
 const Instruction = struct {
     const Self = @This();
     fileReader: *const std.fs.File.Reader,
     writer: *const ArrayList(u8).Writer,
     instruction_type: InstructionType,
     op: Op,
-    // TODO: implement s
     s: u1 = 0, // same as if doesn't exist
     d: u1 = undefined,
     w: u1 = undefined,
@@ -170,7 +289,6 @@ const Instruction = struct {
                     self.fourthByte(try self.fileReader.readByte());
                 }
                 self.immRegSecondByte(try self.fileReader.readByte());
-                print("{}", .{self.s});
                 if (self.w == 1 and self.s == 0) {
                     self.immRegThirdByte(try self.fileReader.readByte());
                 }
@@ -228,8 +346,14 @@ const Instruction = struct {
                     0 => self.data_lo,
                     1 => self.data,
                 };
-                const size = if (self.w == 1 and self.s == 0) "word" else "byte";
-                try self.writer.print("{s} {s}, {s} {}\n", .{ try self.op.str(), rm.items, size, data });
+                // TODO: work out how byte and word should be determined
+                // this doesn't always match the listings
+                const size = switch (self.mod_) {
+                    0, 1 => " byte",
+                    2 => " word",
+                    else => "",
+                };
+                try self.writer.print("{s} {s},{s} {}\n", .{ try self.op.str(), rm.items, size, data });
             },
             InstructionType.MemToAcc, InstructionType.AccToMem => {
                 const acc = switch (self.w) {
@@ -254,7 +378,6 @@ const Instruction = struct {
             },
             InstructionType.ImmediateToAddr => {
                 self.w = @truncate(byte);
-                print("{b} {}", .{ byte, self.op });
                 if (self.op != Op.MOV) {
                     self.s = @truncate(byte >> 1);
                 }
