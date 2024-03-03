@@ -61,6 +61,9 @@ const InstructionType = enum {
     /// +------0 +------+ +------+
     /// 1010001W addr-lo addr-hi
     AccToMem,
+    /// +------0 +------+ [--w=1]
+    /// -------w data     data
+    ImmediateToAcc,
 };
 
 const Op = enum {
@@ -98,9 +101,10 @@ const table = [_]InstructionTable{
     .{ .pattern = 0b1100011, .shift = 1, .ins = InstructionType.ImmediateToAddr, .op = Op.MOV },
     .{ .pattern = 0b1010000, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.MOV },
     .{ .pattern = 0b1010001, .shift = 1, .ins = InstructionType.AccToMem, .op = Op.MOV },
-    .{ .pattern = 0b0000010, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.ADD },
-    .{ .pattern = 0b0010110, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.SUB },
-    .{ .pattern = 0b0011110, .shift = 1, .ins = InstructionType.MemToAcc, .op = Op.CMP },
+    .{ .pattern = 0b0000000, .shift = 2, .ins = InstructionType.AddrToAddr, .op = Op.ADD },
+    .{ .pattern = 0b0000010, .shift = 1, .ins = InstructionType.ImmediateToAcc, .op = Op.ADD },
+    .{ .pattern = 0b0010110, .shift = 1, .ins = InstructionType.ImmediateToAcc, .op = Op.SUB },
+    .{ .pattern = 0b0011110, .shift = 1, .ins = InstructionType.ImmediateToAcc, .op = Op.CMP },
 };
 
 const Instruction = struct {
@@ -151,7 +155,7 @@ const Instruction = struct {
                     self.fourthByte(try self.fileReader.readByte());
                 }
             },
-            InstructionType.ImmediateToReg => {
+            InstructionType.ImmediateToReg, InstructionType.ImmediateToAcc => {
                 self.immRegSecondByte(try self.fileReader.readByte());
                 if (self.w == 1) {
                     self.immRegThirdByte(try self.fileReader.readByte());
@@ -207,6 +211,17 @@ const Instruction = struct {
                 };
                 try self.writer.print("{s} {s}, {}\n", .{ try self.op.str(), reg, data });
             },
+            InstructionType.ImmediateToAcc => {
+                const data = switch (self.w) {
+                    0 => self.data_lo,
+                    1 => self.data,
+                };
+                const acc = switch (self.w) {
+                    0 => "al",
+                    1 => "ax",
+                };
+                try self.writer.print("{s} {s}, {}\n", .{ try self.op.str(), acc, data });
+            },
             (InstructionType.ImmediateToAddr) => {
                 try rmMap(self.rm, self.mod_, self.w, self.disp, &rm.writer());
                 const data = switch (self.w) {
@@ -244,7 +259,7 @@ const Instruction = struct {
                     self.s = @truncate(byte >> 1);
                 }
             },
-            InstructionType.MemToAcc, InstructionType.AccToMem => {
+            InstructionType.MemToAcc, InstructionType.AccToMem, InstructionType.ImmediateToAcc => {
                 // XXXX_XXXW
                 // XXXX_XXSW
                 self.w = @truncate(byte);
