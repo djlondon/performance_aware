@@ -244,58 +244,39 @@ const Instruction = struct {
     data_lo: i8 = undefined,
     data: i16 = undefined,
 
-    pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer) !Self {
-        var instruction_type: InstructionType = undefined;
-        var op: Op = Op.UNDEF;
-        const byte = try fileReader.readByte();
-
-        for (table) |t| {
-            if (byte >> t.shift == t.pattern) {
-                instruction_type = t.ins;
-                op = t.op;
-                break;
-            }
-        } else {
-            return error.UnimplementedInstruction;
-        }
-        var ret = Self{ .fileReader = fileReader, .writer = writer, .instruction_type = instruction_type, .op = op };
-        ret.firstByte(byte);
-        return ret;
-    }
-
     pub fn parse(self: *Self) !void {
         switch (self.instruction_type) {
             InstructionType.AddrToAddr => {
-                self.secondByte(try self.fileReader.readByte());
+                self.modRegRmByte(try self.fileReader.readByte());
                 if (self.mod_ == 1 or self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
-                    self.thirdByte(try self.fileReader.readByte());
+                    self.dispLoByte(try self.fileReader.readByte());
                 }
                 if (self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
-                    self.fourthByte(try self.fileReader.readByte());
+                    self.dispHiByte(try self.fileReader.readByte());
                 }
             },
             InstructionType.ImmediateToReg, InstructionType.ImmediateToAcc => {
-                self.immRegSecondByte(try self.fileReader.readByte());
+                self.dataLoByte(try self.fileReader.readByte());
                 if (self.w == 1) {
-                    self.immRegThirdByte(try self.fileReader.readByte());
+                    self.dataHiByte(try self.fileReader.readByte());
                 }
             },
             InstructionType.ImmediateToAddr => {
-                try self.immAddrSecondByte(try self.fileReader.readByte());
+                try self.modRmByte(try self.fileReader.readByte());
                 if (self.mod_ == 1 or self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
-                    self.thirdByte(try self.fileReader.readByte());
+                    self.dispLoByte(try self.fileReader.readByte());
                 }
                 if (self.mod_ == 2 or (self.rm == 6 and self.mod_ == 0)) {
-                    self.fourthByte(try self.fileReader.readByte());
+                    self.dispHiByte(try self.fileReader.readByte());
                 }
-                self.immRegSecondByte(try self.fileReader.readByte());
+                self.dataLoByte(try self.fileReader.readByte());
                 if (self.w == 1 and self.s == 0) {
-                    self.immRegThirdByte(try self.fileReader.readByte());
+                    self.dataHiByte(try self.fileReader.readByte());
                 }
             },
             InstructionType.MemToAcc, InstructionType.AccToMem => {
-                self.immRegSecondByte(try self.fileReader.readByte());
-                self.immRegThirdByte(try self.fileReader.readByte());
+                self.dataLoByte(try self.fileReader.readByte());
+                self.dataHiByte(try self.fileReader.readByte());
             },
         }
         try self.str();
@@ -395,7 +376,7 @@ const Instruction = struct {
         }
     }
 
-    fn secondByte(self: *Self, byte: u8) void {
+    fn modRegRmByte(self: *Self, byte: u8) void {
         // 76  543 210
         // MOD REG R/M
         self.mod_ = @truncate(byte >> 6);
@@ -403,25 +384,25 @@ const Instruction = struct {
         self.rm = @truncate(byte);
     }
 
-    fn thirdByte(self: *Self, byte: u8) void {
+    fn dispLoByte(self: *Self, byte: u8) void {
         self.disp_lo = @bitCast(byte);
         self.disp = byte;
     }
 
-    fn fourthByte(self: *Self, byte: u8) void {
+    fn dispHiByte(self: *Self, byte: u8) void {
         self.disp += (@as(i16, byte) << 8);
     }
 
-    fn immRegSecondByte(self: *Self, byte: u8) void {
+    fn dataLoByte(self: *Self, byte: u8) void {
         self.data_lo = @bitCast(byte);
         self.data = byte;
     }
 
-    fn immRegThirdByte(self: *Self, byte: u8) void {
+    fn dataHiByte(self: *Self, byte: u8) void {
         self.data += (@as(i16, byte) << 8);
     }
 
-    fn immAddrSecondByte(self: *Self, byte: u8) !void {
+    fn modRmByte(self: *Self, byte: u8) !void {
         // 76  543 210
         // MOD 000 R/M
         const mid: u3 = @truncate(byte >> 3);
