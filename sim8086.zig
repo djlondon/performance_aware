@@ -37,9 +37,11 @@ pub fn main() !void {
             }
         };
     }
-    // TODO: print to stdout not stderr
-    print("bits 16\n\n", .{});
-    print("{s}", .{list.items});
+    var bw = std.io.bufferedWriter(std.io.getStdOut().writer());
+    const stdout = bw.writer();
+    try stdout.print("bits 16\n\n", .{});
+    try stdout.print("{s}", .{list.items});
+    try bw.flush();
 }
 
 pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer) !void {
