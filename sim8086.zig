@@ -470,7 +470,7 @@ const Instruction = struct {
 /// If MOD = 011, this is the same as regMap.
 fn rmMap(rm: u3, mod_: u2, W: u1, disp: i16, writer: *const ArrayList(u8).Writer) !void {
     if (mod_ == 3) {
-        try writer.print("{s}", .{&regMap(rm, W).str()});
+        try writer.print("{s}", .{regMap(rm, W).str()});
         return;
     }
     if (rm == 6 and mod_ == 0) {
