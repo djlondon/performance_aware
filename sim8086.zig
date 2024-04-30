@@ -5,13 +5,19 @@ const print = std.debug.print;
 const fmt = std.fmt;
 const ArrayList = std.ArrayList;
 
-const Args = struct { filePath: []const u8 };
+const Args = struct { filePath: []const u8, exec: bool };
 
 fn processArgs() error{NoFile}!Args {
     var args = std.process.args();
     _ = args.skip();
-    const filePath = args.next() orelse return error.NoFile;
-    return Args{ .filePath = filePath };
+    // if next arg is --exec, set exec true
+    var exec = false;
+    var filePath = args.next() orelse return error.NoFile;
+    if (mem.eql(u8, filePath, "--exec")) {
+        exec = true;
+        filePath = args.next() orelse return error.NoFile;
+    }
+    return Args{ .filePath = filePath, .exec = exec };
 }
 
 fn readFile(filePath: []const u8) !std.fs.File.Reader {
@@ -21,6 +27,7 @@ fn readFile(filePath: []const u8) !std.fs.File.Reader {
 
 pub fn main() !void {
     const args = try processArgs();
+    print("{}", .{args});
     const fileReader = try readFile(args.filePath);
     defer fileReader.context.close();
     // TODO: does buffer size make sense here? investigate other allocators
@@ -43,6 +50,40 @@ pub fn main() !void {
     try stdout.print("{s}", .{list.items});
     try bw.flush();
 }
+
+const Register = enum {
+    ah,
+    al,
+    bh,
+    bl,
+    ch,
+    cl,
+    dh,
+    dl,
+    ax,
+    bx,
+    cx,
+    dx,
+    sp,
+    bp,
+    si,
+    di,
+
+    pub fn str(self: Register) [:0]const u8 {
+        return @tagName(self);
+    }
+};
+
+// registers
+// ax: ah al
+// bx: bh bl
+// cx: ch cl
+// dx: dh dl
+// sp
+// bp
+// si
+// di
+var registers = [_]u8{0} ** 12;
 
 pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer) !void {
     const byte = try fileReader.readByte();
@@ -297,15 +338,18 @@ const Instruction = struct {
                     else => self.disp,
                 };
                 try rmMap(self.rm, self.mod_, self.w, disp, &rm.writer());
-                const reg = regMap(self.reg, self.w);
+                const reg = regMap(self.reg, self.w).str();
                 if (self.d == 1) {
                     try self.writer.print("{s} {s}, {s}\n", .{ try self.op.str(), reg, rm.items });
+                    // if (self.exec) {
+                    //  print(; reg:old->new)
+                    //  registers[] =
                 } else {
                     try self.writer.print("{s} {s}, {s}\n", .{ try self.op.str(), rm.items, reg });
                 }
             },
             (InstructionType.ImmediateToReg) => {
-                const reg = regMap(self.reg, self.w);
+                const reg = regMap(self.reg, self.w).str();
                 const data = switch (self.w) {
                     0 => self.data_lo,
                     1 => self.data,
@@ -426,7 +470,7 @@ const Instruction = struct {
 /// If MOD = 011, this is the same as regMap.
 fn rmMap(rm: u3, mod_: u2, W: u1, disp: i16, writer: *const ArrayList(u8).Writer) !void {
     if (mod_ == 3) {
-        try writer.print("{s}", .{&regMap(rm, W)});
+        try writer.print("{s}", .{&regMap(rm, W).str()});
         return;
     }
     if (rm == 6 and mod_ == 0) {
@@ -451,35 +495,33 @@ fn rmMap(rm: u3, mod_: u2, W: u1, disp: i16, writer: *const ArrayList(u8).Writer
 }
 
 /// Given REG and and W, determine the register
-fn regMap(reg: u3, W: u1) [2]u8 {
-    var out: [2]u8 = undefined;
-    out[0] = switch (W) {
-        0 => switch (reg) {
-            0, 4 => 'a',
-            1, 5 => 'c',
-            2, 6 => 'd',
-            3, 7 => 'b',
+fn regMap(reg: u3, W: u1) Register {
+    switch (W) {
+        0 => {
+            return switch (reg) {
+                0 => Register.al,
+                1 => Register.cl,
+                2 => Register.dl,
+                3 => Register.bl,
+                4 => Register.ah,
+                5 => Register.ch,
+                6 => Register.dh,
+                7 => Register.bh,
+            };
         },
-        1 => switch (reg) {
-            0 => 'a',
-            1 => 'c',
-            2, 7 => 'd',
-            3, 5 => 'b',
-            4, 6 => 's',
+        1 => {
+            return switch (reg) {
+                0 => Register.ax,
+                1 => Register.cx,
+                2 => Register.dx,
+                3 => Register.bx,
+                4 => Register.sp,
+                5 => Register.bp,
+                6 => Register.si,
+                7 => Register.di,
+            };
         },
-    };
-    out[1] = switch (W) {
-        0 => switch (reg) {
-            0...3 => 'l',
-            else => 'h',
-        },
-        1 => switch (reg) {
-            0...3 => 'x',
-            4...5 => 'p',
-            else => 'i',
-        },
-    };
-    return out;
+    }
 }
 
 test "rmMap no displacement" {
@@ -498,7 +540,7 @@ test "rmMap no displacement" {
         var list = ArrayList(u8).init(std.testing.allocator);
         defer list.deinit();
         try rmMap(values.rm, 0, 0, 0, &list.writer());
-        assert(mem.eql(u8, values.out, list.items));
+        try std.testing.expect(mem.eql(u8, values.out, list.items));
     }
 }
 
@@ -517,7 +559,7 @@ test "rmMap displacement" {
         var list = ArrayList(u8).init(std.testing.allocator);
         defer list.deinit();
         try rmMap(values.rm, 2, 0, 257, &list.writer());
-        assert(mem.eql(u8, values.out, list.items));
+        try std.testing.expect(mem.eql(u8, values.out, list.items));
     }
 }
 
@@ -534,8 +576,8 @@ test "byte regMap" {
         .{ .rm = 7, .out = "bh" },
     };
     for (inputs) |values| {
-        const out = regMap(values.rm, 0);
-        assert(mem.eql(u8, &out, values.out));
+        const out = regMap(values.rm, 0).str();
+        try std.testing.expect(mem.eql(u8, out, values.out));
     }
 }
 
@@ -552,7 +594,7 @@ test "word regMap" {
         .{ .rm = 7, .out = "di" },
     };
     for (inputs) |values| {
-        const out = regMap(values.rm, 1);
-        assert(mem.eql(u8, &out, values.out));
+        const out = regMap(values.rm, 1).str();
+        try std.testing.expect(mem.eql(u8, out, values.out));
     }
 }

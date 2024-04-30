@@ -8,16 +8,23 @@ Dissambler for 8086 MOV instructions. See p160+ of the [manual](https://edge.edx
 
 ![MOV](./images/mov.png)
 
+Decode
+  v
+Simulate
+
 Instructions implemented
 
 MOV
-100010dw modregrm (DISP·LO) (DISP·HI)
-1100011w mod000rm (DISP·LO) (DISP·HI) data  data (w=1)
-1011wreg data     data (w=1)
-1010000w addr-lo  addr-hi
-1010001w addr-lo  addr-hi
-10001110 mod0SRrm (DISP·LO) (DISP·HI)
-10001100 mod0SRrm (DISP·LO) (DISP·HI)
+
+
+|---      |---       |---         |---        |---   |--- |
+|100010dw | modregrm | (DISP·LO)  | (DISP·HI) |      | |
+|1100011w | mod000rm | (DISP·LO)  | (DISP·HI) | data | data (w=1) |
+|1011wreg | data     | data (w=1) |           |      | |
+|1010000w | addr-lo  | addr-hi    |           | | |
+|1010001w | addr-lo  | addr-hi    |           | | |
+|10001110 | mod0SRrm | (DISP·LO)  | (DISP·HI) | | |
+|10001100 | mod0SRrm | (DISP·LO)  | (DISP·HI) | | |
 
 ADD
 OOOOOOdw modregr/m (DISP-LO) (DISP·HI)
