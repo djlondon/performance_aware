@@ -27,7 +27,7 @@ fn readFile(filePath: []const u8) !std.fs.File.Reader {
 
 pub fn main() !void {
     const args = try processArgs();
-    print("{}", .{args});
+    print("{s} exec={}\n", .{ args.filePath, args.exec });
     const fileReader = try readFile(args.filePath);
     defer fileReader.context.close();
     // TODO: does buffer size make sense here? investigate other allocators
@@ -37,7 +37,7 @@ pub fn main() !void {
     var list = ArrayList(u8).init(allocator);
     defer list.deinit();
     while (true) {
-        init(&fileReader, &list.writer()) catch |err| {
+        init(&fileReader, &list.writer(), args.exec) catch |err| {
             switch (err) {
                 error.EndOfStream => break,
                 else => |leftover_err| return leftover_err,
@@ -85,7 +85,7 @@ const Register = enum {
 // di
 var registers = [_]u8{0} ** 12;
 
-pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer) !void {
+pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).Writer, exec: bool) !void {
     const byte = try fileReader.readByte();
 
     for (jump_table) |t| {
@@ -98,7 +98,7 @@ pub fn init(fileReader: *const std.fs.File.Reader, writer: *const ArrayList(u8).
 
     for (table) |t| {
         if (byte >> t.shift == t.pattern) {
-            var i = Instruction{ .fileReader = fileReader, .writer = writer, .instruction_type = t.ins, .op = t.op };
+            var i = Instruction{ .fileReader = fileReader, .writer = writer, .instruction_type = t.ins, .op = t.op, .exec = exec };
             i.firstByte(byte);
             try i.parse();
             return;
@@ -286,6 +286,7 @@ const Instruction = struct {
     disp: i16 = undefined,
     data_lo: i8 = undefined,
     data: i16 = undefined,
+    exec: bool = false,
 
     pub fn parse(self: *Self) !void {
         switch (self.instruction_type) {
