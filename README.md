@@ -14,29 +14,30 @@ Simulate
 
 Instructions implemented
 
-MOV
-
-
+| MOV     |       |        |        |   | |
 |---      |---       |---         |---        |---   |--- |
-|100010dw | modregrm | (DISP·LO)  | (DISP·HI) |      | |
-|1100011w | mod000rm | (DISP·LO)  | (DISP·HI) | data | data (w=1) |
-|1011wreg | data     | data (w=1) |           |      | |
-|1010000w | addr-lo  | addr-hi    |           | | |
-|1010001w | addr-lo  | addr-hi    |           | | |
-|10001110 | mod0SRrm | (DISP·LO)  | (DISP·HI) | | |
-|10001100 | mod0SRrm | (DISP·LO)  | (DISP·HI) | | |
+|1000 10dw | mo reg rm | (DISP·LO)  | (DISP·HI) |      | |
+|1100 011w | mo 000 rm | (DISP·LO)  | (DISP·HI) | data | data (w=1) |
+|1011 wreg | data     | data (w=1) |           |      | |
+|1010 000w | addr-lo  | addr-hi    |           | | |
+|1010 001w | addr-lo  | addr-hi    |           | | |
+|1000 1110 | mo 0SR r/m | (DISP·LO)  | (DISP·HI) | | |
+|1000 1100 | mo 0SR r/m | (DISP·LO)  | (DISP·HI) | | |
 
-ADD
-OOOOOOdw modregr/m (DISP-LO) (DISP·HI)
-100000sw mod000r/m (DISP-LO) (DISP·HI) data data (sw=01)
-0000010w data      data (w=1)
+| ADD     |       |        |        | | |
+|---      |---       |---         |---        |---|---|
+| 0000 00dw | mo reg r/m | (DISP-LO) | (DISP·HI) |
+| 1000 00sw | mo 000 r/m | (DISP-LO) | (DISP·HI) | data | data (sw=01) |
+| 0000 010w | data |     data (w=1) | | 
 
-SUB
-001010dw modregr/m (DISP-LO) (DISP·HI)
-100000sw mod101r/m (DISP-LO) (DISP·HI) data data (sw=01)
-0010110w data      data (w=1)
+| SUB     |       |        |        | | |
+|---      |---       |---         |---        |---|---|
+| 0010 10dw | mo reg r/m | (DISP-LO) | (DISP·HI) |
+| 1000 00sw | mo 101 r/m | (DISP-LO) | (DISP·HI) | data | data (sw=01) |
+| 0010 110w | data   |   data (w=1) |
 
-CMP
-001110dw modregr/m
-100000sw mod111r/m
-0011110w data
+| CMP     |       |
+|---      |---       |
+| 001110dw | mo reg r/m |
+| 100000sw | mo 111 r/m |
+| 0011110w | data |
